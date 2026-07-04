@@ -1,7 +1,7 @@
 import streamlit as st
 import yfinance as yf
-import pandas as pd
 import plotly.graph_objects as go
+import pandas as pd
 
 st.set_page_config(
     page_title="Stock Price Dashboard",
@@ -14,11 +14,11 @@ st.title("📈 Stock Price Dashboard")
 ticker = st.text_input(
     "Enter Stock Symbol",
     value="RELIANCE.NS"
-)
+).upper().strip()
 
 period = st.selectbox(
     "Select Time Period",
-    [
+    (
         "1mo",
         "3mo",
         "6mo",
@@ -27,8 +27,7 @@ period = st.selectbox(
         "5y",
         "10y",
         "max"
-    ],
-    index=0
+    )
 )
 
 interval_map = {
@@ -44,34 +43,50 @@ interval_map = {
 
 if st.button("Fetch Data"):
 
-    with st.spinner("Downloading data..."):
+    try:
 
-        data = yf.download(
-            ticker,
-            period=period,
-            interval=interval_map[period],
-            auto_adjust=True,
-            progress=False
-        )
+        with st.spinner("Downloading data..."):
 
-    if data.empty:
-        st.error("No data found.")
-    else:
+            data = yf.download(
+                ticker,
+                period=period,
+                interval=interval_map[period],
+                auto_adjust=True,
+                progress=False,
+                group_by="column"
+            )
 
-        st.success("Data Loaded Successfully")
+        if data.empty:
+            st.error("No data available for this ticker.")
+            st.stop()
 
-        latest = data["Close"].iloc[-1]
-        first = data["Close"].iloc[0]
+        # Handle MultiIndex columns returned by latest yfinance
+        if isinstance(data.columns, pd.MultiIndex):
+            data.columns = data.columns.get_level_values(0)
+
+        if "Close" not in data.columns:
+            st.error("Close price not found.")
+            st.stop()
+
+        close = data["Close"]
+
+        # Convert to Series if still DataFrame
+        if isinstance(close, pd.DataFrame):
+            close = close.iloc[:, 0]
+
+        latest = float(close.iloc[-1])
+        first = float(close.iloc[0])
+
         returns = ((latest - first) / first) * 100
 
-        c1, c2 = st.columns(2)
+        col1, col2 = st.columns(2)
 
-        c1.metric(
+        col1.metric(
             "Latest Close",
             f"{latest:.2f}"
         )
 
-        c2.metric(
+        col2.metric(
             "Return",
             f"{returns:.2f}%"
         )
@@ -81,17 +96,17 @@ if st.button("Fetch Data"):
         fig.add_trace(
             go.Scatter(
                 x=data.index,
-                y=data["Close"],
+                y=close,
                 mode="lines",
-                name="Close Price"
+                name=ticker
             )
         )
 
         fig.update_layout(
             title=f"{ticker} Closing Price ({period})",
+            template="plotly_white",
             xaxis_title="Date",
             yaxis_title="Price",
-            template="plotly_white",
             height=600
         )
 
@@ -100,11 +115,11 @@ if st.button("Fetch Data"):
         st.subheader("Historical Data")
 
         st.dataframe(
-            data[::-1],
+            data.iloc[::-1],
             use_container_width=True
         )
 
-        csv = data.to_csv().encode()
+        csv = data.to_csv(index=True).encode("utf-8")
 
         st.download_button(
             "Download CSV",
@@ -112,3 +127,6 @@ if st.button("Fetch Data"):
             file_name=f"{ticker}_{period}.csv",
             mime="text/csv"
         )
+
+    except Exception as e:
+        st.error(f"Error: {e}")
